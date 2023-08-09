@@ -234,7 +234,7 @@ class LocalUpdateDJSRH(object):
                 loss = Lc * args.alpha + Lr * (1. - args.alpha)
 
                 loss_RG = 0*loss
-                loss_RL = 0*loss
+            
                 if len(global_protos) != 0:
                     hid_I_p, code_I_p = private_img_model(img)
                     hid_T_p, code_T_p = private_txt_model(txt)
@@ -243,12 +243,9 @@ class LocalUpdateDJSRH(object):
                     queue_v,out = update_queue(self.queue_v_local,fushed)
                     kmeans = KMeans(n_clusters=24,mode='cosine')#, verbose=1)
                     cluster_r = kmeans.fit_predict(queue_v)
-                    local_protos = kmeans.centroids
-              
-                    loss_RG=self.js_loss(hid_I,hid_T,global_protos[0],t=self.args.temperature, t2=self.args.ts)
-                    loss_RL=self.js_loss(hid_I,hid_T,local_protos,t=self.args.temperature, t2=self.args.ss)
-                       
-                loss = loss  + loss_RL +  loss_RG
+                     local_protos = kmeans.centroids
+                    loss_RG=self.js_loss(hid_I,hid_T,global_protos[0],t=self.args.temperature, t2=self.args.ts)  
+                loss = loss  + loss_RL
                 optimizer_i.zero_grad()
                 optimizer_t.zero_grad()
                 loss.backward()
@@ -321,16 +318,6 @@ class LocalUpdateDJSRH(object):
 
       if self.args.nce==0:
           I2C_loss = F.nll_loss(F.log_softmax(S, dim=1), labels)
-
-      else:
-          S = S.view(S.shape[0], S.shape[1], -1)
-          nominator = S * target[:, :, None]
-          nominator = nominator.sum(dim=1)
-          nominator = torch.logsumexp(nominator, dim=1)
-          denominator = S.view(S.shape[0], -1)
-          denominator = torch.logsumexp(denominator, dim=1)
-          I2C_loss = torch.mean(denominator - nominator)
-
       return I2C_loss
   
     def js_loss(self,x1, x2, xa, t=0.1, t2=0.01):
