@@ -117,8 +117,6 @@ class InstProtoRC(nn.Module):
         q1 = torch.matmul(F_I,prototypes.T)
         qi = torch.softmax(q1,dim=1)
         S_ii = torch.mm(qi,qi.T)
-  
-
 
         q2 = torch.matmul(F_T,prototypes.T)
         qt = torch.softmax(q2,dim=1)
@@ -135,9 +133,6 @@ class InstProtoRC(nn.Module):
 
 
         S = S_ii + S_tt
-
-
-
 
 
         loss2 = self.mse(BI_BT, S)
