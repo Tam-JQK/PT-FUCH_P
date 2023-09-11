@@ -1,4 +1,5 @@
 # PT-FUCH
+paper “Prototype-guided Knowledge Transfer for Federated Unsupervised Cross-modal Hashing” code
 # Acknowledgements:<br />
 UCCH:https://github.com/penghu-cs/UCCH <br />
 FedML:https://github.com/FedML-AI/FedML <br />
