@@ -4,6 +4,7 @@ import h5py
 import scipy.io as scio
 from torch.utils.data.dataset import Dataset
 from torch.utils.data import DataLoader
+from models import CNNFImgModule
 import copy
 from fast_pytorch_kmeans import KMeans
 from torch.autograd import Variable
@@ -206,9 +207,9 @@ def load_data(args,path):
 
     file.close()
 
-    pretrain_model = load_pretrain_model("imagenet-vgg-f.mat")
+    pretrain_model = load_pretrain_model("./imagenet-vgg-f.mat")
    
-    FeatNet_I = ImgModule(pretrain_model)
+    FeatNet_I = CNNFImgModule(pretrain_model)
     FeatNet_I.cuda().eval()
     num_data = len(images)
     new_images = np.zeros((num_data, 4096))
@@ -220,6 +221,7 @@ def load_data(args,path):
     tags = tags.astype(np.float32)
 
     labels = labels.astype(int)
+
 
     
 
@@ -243,6 +245,7 @@ def getdataset(args,database_s,data_path):
     retrieval_L = L['retrieval']
     retrieval_x = X['retrieval']
     retrieval_y = Y['retrieval']
+
     
 
 
@@ -401,8 +404,8 @@ def get_persolabels(number_of_clients,images):
     
     return labels_cluster
 
-def prepare_data_flickr_noniid(args):
-    datapath = "./FLICKR-25K.mat"
+def prepare_data_noniid(args):
+    datapath = "/flickr.mat"
     database_s = 18016
     train_L,train_x,train_y,retrieval_L,retrieval_x,retrieval_y,query_L,query_x,query_y= getdataset(args,database_s,datapath)
     n_classes = 24

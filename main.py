@@ -14,7 +14,6 @@ from TextNet import TextNet
 from torch.nn.utils.clip_grad import clip_grad_norm_
 import os.path as osp
 import math
-import wandb
 
 
 
@@ -26,9 +25,9 @@ def args_parser():
     parser.add_argument("--ss", type=float, default=0.81, help="the temperature parameter for js loss in student model")
 
     parser.add_argument('--rounds', type=int, default=100, help="number of rounds of training")
-    parser.add_argument('--train_ep', type=int, default=5, help="the number of local episodes: E")
-    parser.add_argument('--train_ep_private', type=int, default=5, help="the number of local episodes: E")
-    parser.add_argument('--learning_rate_img_private', type=float, default=1e-5, metavar='N',help='learning_rate')
+    parser.add_argument('--train_ep', type=int, default=10, help="the number of local episodes: E")
+    parser.add_argument('--train_ep_private', type=int, default=10, help="the number of local episodes: E")
+    parser.add_argument('--learning_rate_img_private', type=float, default=1e-5, metavar='N',help='learning_rate')#0.01
     parser.add_argument('--learning_rate_txt_private', type=float, default=1e-5, metavar='N',help='learning_rate')
     parser.add_argument('--weight_decay_p', default=1e-6, type=float, help='weight_decay')
     parser.add_argument('--seed', type=int, default=1024, help='random seed')
@@ -39,7 +38,7 @@ def args_parser():
     parser.add_argument('--alg', type=str, default='FedUCCH', help="algorithms")
     parser.add_argument('--noniid', type=str, default='--', help="noniid")
     parser.add_argument('--batch_size', type=int, default=256, help="local batch size")
-    parser.add_argument('--learning_rate_img', type=float, default=1e-4, metavar='N',help='learning_rate')
+    parser.add_argument('--learning_rate_img', type=float, default=1e-4, metavar='N',help='learning_rate')#0.01
     parser.add_argument('--learning_rate_txt', type=float, default=1e-4, metavar='N',help='learning_rate')
     parser.add_argument('--momentum', type=float, default=0.4, help='SGD momentum (default: 0.9)')
     parser.add_argument('--weight_decay', default=1e-6, type=float, help='weight_decay')
@@ -66,13 +65,14 @@ class LocalUpdateDJSRH(object):
     def __init__(self, args, id,dataset,idxs):
         self.id = id
         self.args = args
-        self.dataset = dataset
+        self.dataset = dataset#[train_L,train_x,train_y]
         self.m_size = len(idxs)
         dataloader_train = self.train_val_test(dataset,idxs)
         self.dataloader_train = dataloader_train['train']
         self.device = args.device
         self.loss_mse = nn.MSELoss().to(self.device)
 
+        #UCCH
         self.criterion = ContrastiveLoss(args.margin, shift=args.shift)
         self.contrast = NCEAverage(args.bit, self.m_size, args.K, args.T, args.momentum)
         criterion_contrast = NCESoftmaxLoss()
@@ -91,7 +91,10 @@ class LocalUpdateDJSRH(object):
             ).cuda()
         
     def train_val_test(self, dataset, train_idxs):
-
+        """
+        Returns train, validation and test dataloaders for a given dataset
+        and user indexes.
+        """
         
         train_L =dataset[0]
         train_x = dataset[1]
@@ -234,7 +237,7 @@ class LocalUpdateDJSRH(object):
                 loss = Lc * args.alpha + Lr * (1. - args.alpha)
 
                 loss_RG = 0*loss
-            
+                loss_RL = 0*loss
                 if len(global_protos) != 0:
                     hid_I_p, code_I_p = private_img_model(img)
                     hid_T_p, code_T_p = private_txt_model(txt)
@@ -243,9 +246,12 @@ class LocalUpdateDJSRH(object):
                     queue_v,out = update_queue(self.queue_v_local,fushed)
                     kmeans = KMeans(n_clusters=24,mode='cosine')#, verbose=1)
                     cluster_r = kmeans.fit_predict(queue_v)
-                     local_protos = kmeans.centroids
-                    loss_RG=self.js_loss(hid_I,hid_T,global_protos[0],t=self.args.temperature, t2=self.args.ts)  
-                loss = loss  + loss_RL
+                    local_protos = kmeans.centroids
+              
+                    loss_RG=self.js_loss(hid_I,hid_T,global_protos[0],t=self.args.temperature, t2=self.args.ts)
+                    loss_RL=self.js_loss(hid_I,hid_T,local_protos,t=self.args.temperature, t2=self.args.ss)
+                       
+                loss = loss  + loss_RL +  loss_RG
                 optimizer_i.zero_grad()
                 optimizer_t.zero_grad()
                 loss.backward()
@@ -318,6 +324,16 @@ class LocalUpdateDJSRH(object):
 
       if self.args.nce==0:
           I2C_loss = F.nll_loss(F.log_softmax(S, dim=1), labels)
+
+      else:
+          S = S.view(S.shape[0], S.shape[1], -1)
+          nominator = S * target[:, :, None]
+          nominator = nominator.sum(dim=1)
+          nominator = torch.logsumexp(nominator, dim=1)
+          denominator = S.view(S.shape[0], -1)
+          denominator = torch.logsumexp(denominator, dim=1)
+          I2C_loss = torch.mean(denominator - nominator)
+
       return I2C_loss
   
     def js_loss(self,x1, x2, xa, t=0.1, t2=0.01):
@@ -418,6 +434,7 @@ class LocalTest(object):
 
 if __name__ == '__main__':
     args = args_parser()
+    print(args)
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     torch.cuda.set_device(args.gpu)
     if args.device == 'cuda':
@@ -428,7 +445,7 @@ if __name__ == '__main__':
         torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    dataset_train,dataset_test,client_idcs_train,client_idcs_retrieval,client_idcs_qery = prepare_data_flickr_noniid(args=args)
+    dataset_train,dataset_test,client_idcs_train,client_idcs_retrieval,client_idcs_qery = prepare_data_noniid(args=args)
 
 
     txt_len = 1386
@@ -457,14 +474,14 @@ if __name__ == '__main__':
       private_weights_img, private_weights_txt = [],[]
       idxs_users = np.arange(args.num_users)
       for idx in idxs_users:
-        
+        print("client",idx)
         local_model = LocalUpdateDJSRH(args=args,id=idx,dataset=dataset_train, idxs=client_idcs_train[idx])
 
         if len(global_avg_protos) != len(idxs_users):
             global_avg_protos_for_this_client = global_avg_protos
         else:
             global_avg_protos_for_this_client = global_avg_protos[idx]
-    
+
         w_img,w_txt,private_w_img,private_w_txt,local_centroid= local_model.update_weights_UCCH_new(args,idx,global_avg_protos_for_this_client,model_img=copy.deepcopy(global_model_img), model_txt=copy.deepcopy(global_model_txt),private_img_model=copy.deepcopy(private_img_model_list[idx]), private_txt_model=copy.deepcopy(private_txt_model_list[idx]))
 
         local_weights_img.append(copy.deepcopy(w_img))
@@ -474,6 +491,7 @@ if __name__ == '__main__':
         private_weights_txt.append(copy.deepcopy(private_w_txt))
 
         local_protos[idx] = copy.deepcopy(local_centroid)
+
       local_weights_list_img = average_weights(local_weights_img)
       local_weights_list_txt = average_weights(local_weights_txt)
       global_avg_protos = global_proto_cluster(local_protos)
@@ -489,7 +507,7 @@ if __name__ == '__main__':
       global_model_txt.load_state_dict(local_weights_list_txt[0], strict=True)
 
 
-      if round % 10== 0:
+      if round % 2== 0:
           with torch.no_grad():
               MAP_I2T_all, MAP_T2I_all = 0.0,0.0
               for idx in range(args.num_users):
